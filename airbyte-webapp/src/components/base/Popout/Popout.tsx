@@ -1,7 +1,7 @@
 import React, { ReactNode, useMemo } from "react";
-import styled from "styled-components";
-import { useToggle } from "react-use";
 import { ActionMeta, ControlProps } from "react-select";
+import { useToggle } from "react-use";
+import styled from "styled-components";
 
 import { DropDown } from "components";
 import { DropdownProps } from "components/base/DropDown";
@@ -18,28 +18,22 @@ const OutsideClickListener = styled.div`
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Value = any;
 
-const ControlComponent = (props: ControlProps<Value, false>) => (
+const ControlComponent = (props: ControlProps & { selectProps: Value }) => (
   <div ref={props.innerRef}>
     {props.selectProps.selectProps.targetComponent({
       onOpen: props.selectProps.selectProps.onOpen,
+      isOpen: props.selectProps.menuIsOpen,
       value: props.selectProps.value,
     })}
   </div>
 );
 
-type PopoutProps = DropdownProps & {
-  targetComponent: (props: {
-    onOpen: () => void;
-    isOpen?: boolean;
-    value: Value;
-  }) => ReactNode;
-};
+interface PopoutProps extends DropdownProps {
+  targetComponent: (props: { onOpen: () => void; isOpen?: boolean; value: Value }) => ReactNode;
+  title?: string;
+}
 
-const Popout: React.FC<PopoutProps> = ({
-  onChange,
-  targetComponent,
-  ...props
-}) => {
+const Popout: React.FC<PopoutProps> = ({ onChange, targetComponent, ...props }) => {
   const [isOpen, toggleOpen] = useToggle(false);
 
   const onSelectChange = (value: Value, meta: ActionMeta<Value>) => {
@@ -69,8 +63,10 @@ const Popout: React.FC<PopoutProps> = ({
   return (
     <>
       <DropDown
-        selectProps={{ targetComponent, onOpen: toggleOpen }}
-        autoFocus
+        selectProps={{
+          targetComponent,
+          onOpen: toggleOpen,
+        }}
         backspaceRemovesValue={false}
         controlShouldRenderValue={false}
         hideSelectedOptions={false}

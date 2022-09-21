@@ -1,8 +1,10 @@
 /*
- * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
+ * Copyright (c) 2022 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.integrations.destination.databricks;
+
+import static org.apache.logging.log4j.util.Strings.EMPTY;
 
 import com.amazonaws.services.s3.AmazonS3;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,6 +20,7 @@ import io.airbyte.protocol.models.AirbyteRecordMessage;
 import io.airbyte.protocol.models.ConfiguredAirbyteStream;
 import io.airbyte.protocol.models.DestinationSyncMode;
 import java.sql.Timestamp;
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -206,15 +209,11 @@ public class DatabricksStreamCopier implements StreamCopier {
    * creates an {@link S3DestinationConfig} whose bucket path is <bucket-path>/<staging-folder>.
    */
   static S3DestinationConfig getStagingS3DestinationConfig(final S3DestinationConfig config, final String stagingFolder) {
-    return new S3DestinationConfig(
-        config.getEndpoint(),
-        config.getBucketName(),
-        String.join("/", config.getBucketPath(), stagingFolder),
-        config.getBucketRegion(),
-        config.getAccessKeyId(),
-        config.getSecretAccessKey(),
-        // use default parquet format config
-        new S3ParquetFormatConfig(MAPPER.createObjectNode()));
+    return S3DestinationConfig.create(config)
+        .withBucketPath(String.join("/", config.getBucketPath(), stagingFolder))
+        .withFormatConfig(new S3ParquetFormatConfig(MAPPER.createObjectNode()))
+        .withFileNamePattern(Optional.ofNullable(config.getFileNamePattern()).orElse(EMPTY))
+        .get();
   }
 
 }

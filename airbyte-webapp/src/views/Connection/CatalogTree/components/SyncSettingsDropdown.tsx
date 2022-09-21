@@ -1,15 +1,12 @@
 import React from "react";
-import { components, ControlProps } from "react-select";
 import { FormattedMessage } from "react-intl";
+import { components, ControlProps } from "react-select";
 import styled from "styled-components";
 
 import { DropDown, DropdownProps } from "components";
-import Text from "components/base/DropDown/components/Text";
+import { IDataItem, OptionView } from "components/base/DropDown/components/Option";
 import { IProps } from "components/base/DropDown/components/SingleValue";
-import {
-  IDataItem,
-  OptionView,
-} from "components/base/DropDown/components/Option";
+import Text from "components/base/DropDown/components/Text";
 
 const ValueView = styled(components.SingleValue)`
   display: flex;
@@ -27,8 +24,8 @@ const Separator = styled.div`
   padding: 0 5px;
 `;
 
-const SingleValue: React.FC<IProps> = (props) => {
-  const { syncMode, destinationSyncMode } = props.data.value;
+const SingleValue: React.FC<IProps<unknown>> = (props) => {
+  const { syncMode, destinationSyncMode } = props.data?.value;
   return (
     <Text>
       <ValueView {...props}>
@@ -55,9 +52,7 @@ const OptionContent = styled(OptionView)`
   font-size: 12px;
 `;
 
-const DropdownControl = styled(components.Control)<
-  ControlProps<IDataItem, false>
->`
+const DropdownControl = styled(components.Control)<ControlProps<IDataItem, false>>`
   &.react-select__control {
     // background: ${({ theme }) => theme.greyColor20};
     // TODO: fix theme
@@ -88,10 +83,7 @@ const Option: React.FC<any> = (props) => {
 
   return (
     <components.Option {...props}>
-      <OptionContent
-        data-id={props.data.value}
-        isSelected={props.isSelected && !props.isMulti}
-      >
+      <OptionContent data-id={props.data.value} isSelected={props.isSelected && !props.isMulti}>
         <Mode
           title={<FormattedMessage id="connectionForm.syncType.source" />}
           label={<FormattedMessage id={`syncMode.${syncMode}`} />}
@@ -99,11 +91,7 @@ const Option: React.FC<any> = (props) => {
         />
         <Mode
           title={<FormattedMessage id="connectionForm.syncType.destination" />}
-          label={
-            <FormattedMessage
-              id={`destinationSyncMode.${destinationSyncMode}`}
-            />
-          }
+          label={<FormattedMessage id={`destinationSyncMode.${destinationSyncMode}`} />}
         />
       </OptionContent>
     </components.Option>
@@ -114,10 +102,11 @@ const SyncSettingsDropdown: React.FC<DropdownProps> = (props) => (
   <DropDown
     {...props}
     components={{
-      SingleValue: SingleValue,
-      Option: Option,
+      SingleValue,
+      Option,
       Control: DropdownControl,
     }}
+    data-testid="syncSettingsDropdown"
     $withBorder
   />
 );

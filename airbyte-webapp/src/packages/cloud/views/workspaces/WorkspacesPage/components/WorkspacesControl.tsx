@@ -1,15 +1,16 @@
 import React from "react";
-import styled from "styled-components";
 import { FormattedMessage } from "react-intl";
 import { useToggle } from "react-use";
+import styled from "styled-components";
 
-import { Button, ContentCard } from "components";
+import { Button, Card } from "components";
+
 import CreateWorkspaceForm from "./CreateWorkspaceForm";
 
 const CreateButton = styled(Button)`
   margin-top: 25px;
 `;
-const FormContent = styled(ContentCard)`
+const FormContent = styled(Card)`
   padding: 15px 20px 16px 20px;
 `;
 

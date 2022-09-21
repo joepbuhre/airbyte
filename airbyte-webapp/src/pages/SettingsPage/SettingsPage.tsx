@@ -1,21 +1,22 @@
 import React, { Suspense } from "react";
 import { FormattedMessage } from "react-intl";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 
-import useConnector from "hooks/services/useConnector";
+import HeadTitle from "components/HeadTitle";
+import LoadingPage from "components/LoadingPage";
 import MainPageWithScroll from "components/MainPageWithScroll";
 import PageTitle from "components/PageTitle";
-import LoadingPage from "components/LoadingPage";
-import HeadTitle from "components/HeadTitle";
 import SideMenu from "components/SideMenu";
-import useRouter from "hooks/useRouter";
-import NotificationPage from "./pages/NotificationPage";
-import ConfigurationsPage from "./pages/ConfigurationsPage";
-import MetricsPage from "./pages/MetricsPage";
-import AccountPage from "./pages/AccountPage";
-import { DestinationsPage, SourcesPage } from "./pages/ConnectorsPage";
 import { CategoryItem } from "components/SideMenu/SideMenu";
+
+import useConnector from "hooks/services/useConnector";
+
+import AccountPage from "./pages/AccountPage";
+import ConfigurationsPage from "./pages/ConfigurationsPage";
+import { DestinationsPage, SourcesPage } from "./pages/ConnectorsPage";
+import MetricsPage from "./pages/MetricsPage";
+import NotificationPage from "./pages/NotificationPage";
 
 const Content = styled.div`
   margin: 0 33px 0 27px;
@@ -28,13 +29,13 @@ const MainView = styled.div`
   margin-left: 47px;
 `;
 
-export type PageConfig = {
+export interface PageConfig {
   menuConfig: CategoryItem[];
-};
+}
 
-type SettingsPageProps = {
+interface SettingsPageProps {
   pageConfig?: PageConfig;
-};
+}
 
 export const SettingsRoute = {
   Account: "account",
@@ -46,7 +47,8 @@ export const SettingsRoute = {
 } as const;
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ pageConfig }) => {
-  const { push, pathname } = useRouter();
+  const push = useNavigate();
+  const { pathname } = useLocation();
   const { countNewSourceVersion, countNewDestinationVersion } = useConnector();
 
   const menuItems: CategoryItem[] = pageConfig?.menuConfig || [
@@ -94,16 +96,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ pageConfig }) => {
   return (
     <MainPageWithScroll
       headTitle={<HeadTitle titles={[{ id: "sidebar.settings" }]} />}
-      pageTitle={
-        <PageTitle title={<FormattedMessage id="sidebar.settings" />} />
-      }
+      pageTitle={<PageTitle title={<FormattedMessage id="sidebar.settings" />} />}
     >
       <Content>
-        <SideMenu
-          data={menuItems}
-          onSelect={onSelectMenuItem}
-          activeItem={pathname}
-        />
+        <SideMenu data={menuItems} onSelect={onSelectMenuItem} activeItem={pathname} />
 
         <MainView>
           <Suspense fallback={<LoadingPage />}>

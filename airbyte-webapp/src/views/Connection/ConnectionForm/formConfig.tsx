@@ -1,90 +1,118 @@
 import { useMemo } from "react";
 import { useIntl } from "react-intl";
 import * as yup from "yup";
-import { setIn } from "formik";
 
-import {
-  AirbyteStreamConfiguration,
-  AirbyteSyncSchema,
-  DestinationSyncMode,
-  SyncMode,
-  SyncSchema,
-  SyncSchemaStream,
-} from "core/domain/catalog";
-import { ValuesProps } from "hooks/services/useConnectionHook";
+import { DropDownRow } from "components";
+
+import { frequencyConfig } from "config/frequencyConfig";
+import { SyncSchema } from "core/domain/catalog";
 import {
   isDbtTransformation,
   isNormalizationTransformation,
   NormalizationType,
-  Operation,
-  OperatorType,
-  Transformation,
 } from "core/domain/connection/operation";
-import { DropDownRow } from "components";
-import FrequencyConfig from "config/FrequencyConfig.json";
-import { Connection, ScheduleProperties } from "core/resources/Connection";
-import {
-  ConnectionNamespaceDefinition,
-  ConnectionSchedule,
-} from "core/domain/connection";
 import { SOURCE_NAMESPACE_TAG } from "core/domain/connector/source";
-import useWorkspace from "hooks/services/useWorkspace";
-import { DestinationDefinitionSpecification } from "core/domain/connector";
+import {
+  ConnectionScheduleData,
+  ConnectionScheduleType,
+  DestinationDefinitionSpecificationRead,
+  DestinationSyncMode,
+  NamespaceDefinitionType,
+  OperationCreate,
+  OperationRead,
+  OperatorType,
+  SyncMode,
+  WebBackendConnectionRead,
+} from "core/request/AirbyteClient";
+import { ConnectionOrPartialConnection } from "hooks/services/Connection/ConnectionFormService";
+import { ValuesProps } from "hooks/services/useConnectionHook";
+import { useCurrentWorkspace } from "services/workspaces/WorkspacesService";
 
-type FormikConnectionFormValues = {
-  schedule?: ScheduleProperties | null;
+import calculateInitialCatalog from "./calculateInitialCatalog";
+
+export interface FormikConnectionFormValues {
+  name?: string;
+  scheduleType?: ConnectionScheduleType | null;
+  scheduleData?: ConnectionScheduleData | null;
   prefix: string;
   syncCatalog: SyncSchema;
-  namespaceDefinition?: ConnectionNamespaceDefinition;
+  namespaceDefinition?: NamespaceDefinitionType;
   namespaceFormat: string;
-  transformations?: Transformation[];
+  transformations?: OperationRead[];
   normalization?: NormalizationType;
-};
+}
 
-type ConnectionFormValues = ValuesProps;
+export type ConnectionFormValues = ValuesProps;
 
-const SUPPORTED_MODES: [SyncMode, DestinationSyncMode][] = [
-  [SyncMode.FullRefresh, DestinationSyncMode.Overwrite],
-  [SyncMode.FullRefresh, DestinationSyncMode.Append],
-  [SyncMode.Incremental, DestinationSyncMode.Append],
-  [SyncMode.Incremental, DestinationSyncMode.Dedupted],
+export const SUPPORTED_MODES: Array<[SyncMode, DestinationSyncMode]> = [
+  [SyncMode.incremental, DestinationSyncMode.append_dedup],
+  [SyncMode.full_refresh, DestinationSyncMode.overwrite],
+  [SyncMode.incremental, DestinationSyncMode.append],
+  [SyncMode.full_refresh, DestinationSyncMode.append],
 ];
 
-function useDefaultTransformation(): Transformation {
-  const { workspace } = useWorkspace();
+const DEFAULT_SCHEDULE: ConnectionScheduleData = {
+  basicSchedule: {
+    units: 24,
+    timeUnit: "hours",
+  },
+};
 
+export function useDefaultTransformation(): OperationCreate {
+  const workspace = useCurrentWorkspace();
   return {
     name: "My dbt transformations",
     workspaceId: workspace.workspaceId,
     operatorConfiguration: {
-      operatorType: OperatorType.Dbt,
+      operatorType: OperatorType.dbt,
       dbt: {
-        dockerImage: "fishtownanalytics/dbt:0.19.1",
+        gitRepoUrl: "", // TODO: Does this need a value?
+        dockerImage: "fishtownanalytics/dbt:1.0.0",
         dbtArguments: "run",
       },
     },
   };
 }
 
-const connectionValidationSchema = yup
+export const connectionValidationSchema = yup
   .object({
-    schedule: yup
-      .object({
-        units: yup.number().required("form.empty.error"),
-        timeUnit: yup.string().required("form.empty.error"),
-      })
-      .nullable()
-      .defined("form.empty.error"),
+    name: yup.string().required("form.empty.error"),
+    scheduleType: yup
+      .string()
+      .oneOf([ConnectionScheduleType.manual, ConnectionScheduleType.basic, ConnectionScheduleType.cron]),
+    scheduleData: yup.mixed().when("scheduleType", (scheduleType) => {
+      if (scheduleType === ConnectionScheduleType.basic) {
+        return yup.object({
+          basicSchedule: yup
+            .object({
+              units: yup.number().required("form.empty.error"),
+              timeUnit: yup.string().required("form.empty.error"),
+            })
+            .defined("form.empty.error"),
+        });
+      } else if (scheduleType === ConnectionScheduleType.manual) {
+        return yup.mixed().notRequired();
+      }
+
+      return yup.object({
+        cron: yup
+          .object({
+            cronExpression: yup.string().required("form.empty.error"),
+            cronTimeZone: yup.string().required("form.empty.error"),
+          })
+          .defined("form.empty.error"),
+      });
+    }),
     namespaceDefinition: yup
       .string()
       .oneOf([
-        ConnectionNamespaceDefinition.Source,
-        ConnectionNamespaceDefinition.Destination,
-        ConnectionNamespaceDefinition.CustomFormat,
+        NamespaceDefinitionType.source,
+        NamespaceDefinitionType.destination,
+        NamespaceDefinitionType.customformat,
       ])
       .required("form.empty.error"),
     namespaceFormat: yup.string().when("namespaceDefinition", {
-      is: ConnectionNamespaceDefinition.CustomFormat,
+      is: NamespaceDefinitionType.customformat,
       then: yup.string().required("form.empty.error"),
     }),
     prefix: yup.string(),
@@ -94,7 +122,9 @@ const connectionValidationSchema = yup
           id: yup
             .string()
             // This is required to get rid of id fields we are using to detect stream for edition
-            .strip(true),
+            .when("$isRequest", (isRequest: boolean, schema: yup.StringSchema) =>
+              isRequest ? schema.strip(true) : schema
+            ),
           stream: yup.object(),
           config: yup
             .object({
@@ -108,13 +138,11 @@ const connectionValidationSchema = yup
               name: "connectionSchema.config.validator",
               // eslint-disable-next-line no-template-curly-in-string
               message: "${path} is wrong",
-              test: function (value) {
+              test(value) {
                 if (!value.selected) {
                   return true;
                 }
-                if (
-                  DestinationSyncMode.Dedupted === value.destinationSyncMode
-                ) {
+                if (DestinationSyncMode.append_dedup === value.destinationSyncMode) {
                   // it's possible that primaryKey array is always present
                   // however yup couldn't determine type correctly even with .required() call
                   if (value.primaryKey?.length === 0) {
@@ -125,7 +153,7 @@ const connectionValidationSchema = yup
                   }
                 }
 
-                if (SyncMode.Incremental === value.syncMode) {
+                if (SyncMode.incremental === value.syncMode) {
                   if (
                     !this.parent.stream.sourceDefinedCursor &&
                     // it's possible that cursorField array is always present
@@ -158,21 +186,19 @@ const connectionValidationSchema = yup
  * @param initialOperations
  * @param workspaceId
  */
-function mapFormPropsToOperation(
+export function mapFormPropsToOperation(
   values: {
-    transformations?: Transformation[];
+    transformations?: OperationRead[];
     normalization?: NormalizationType;
   },
-  initialOperations: Operation[] = [],
+  initialOperations: OperationRead[] = [],
   workspaceId: string
-): Operation[] {
-  const newOperations: Operation[] = [];
+): OperationCreate[] {
+  const newOperations: OperationCreate[] = [];
 
   if (values.normalization) {
-    if (values.normalization !== NormalizationType.RAW) {
-      const normalizationOperation = initialOperations.find(
-        isNormalizationTransformation
-      );
+    if (values.normalization !== NormalizationType.raw) {
+      const normalizationOperation = initialOperations.find(isNormalizationTransformation);
 
       if (normalizationOperation) {
         newOperations.push(normalizationOperation);
@@ -181,7 +207,7 @@ function mapFormPropsToOperation(
           name: "Normalization",
           workspaceId,
           operatorConfiguration: {
-            operatorType: OperatorType.Normalization,
+            operatorType: OperatorType.normalization,
             normalization: {
               option: values.normalization,
             },
@@ -198,112 +224,42 @@ function mapFormPropsToOperation(
   return newOperations;
 }
 
-function getDefaultCursorField(streamNode: SyncSchemaStream): string[] {
-  if (streamNode.stream.defaultCursorField.length) {
-    return streamNode.stream.defaultCursorField;
-  }
-  return streamNode.config.cursorField;
-}
+export const getInitialTransformations = (operations: OperationCreate[]): OperationRead[] =>
+  operations?.filter(isDbtTransformation) ?? [];
 
-const calculateInitialCatalog = (
-  schema: AirbyteSyncSchema,
-  destDefinition: DestinationDefinitionSpecification,
-  isEditMode?: boolean
-): SyncSchema => ({
-  streams: schema.streams.map<SyncSchemaStream>((apiNode, id) => {
-    const nodeWithId: SyncSchemaStream = { ...apiNode, id: id.toString() };
-
-    // If the value in supportedSyncModes is empty assume the only supported sync mode is FULL_REFRESH.
-    // Otherwise, it supports whatever sync modes are present.
-    const streamNode = nodeWithId.stream.supportedSyncModes?.length
-      ? nodeWithId
-      : setIn(nodeWithId, "stream.supportedSyncModes", [SyncMode.FullRefresh]);
-
-    // If syncMode isn't null and we are in create mode - don't change item
-    // According to types syncMode is a non-null field, but it is a legacy check for older versions
-    if (streamNode.config.syncMode && isEditMode) {
-      return streamNode;
-    }
-
-    const updatedConfig: AirbyteStreamConfiguration = {
-      ...streamNode.config,
-    };
-
-    if (
-      destDefinition.supportedDestinationSyncModes.includes(
-        DestinationSyncMode.Dedupted
-      )
-    ) {
-      updatedConfig.destinationSyncMode = DestinationSyncMode.Dedupted;
-    }
-
-    const supportedSyncModes = streamNode.stream.supportedSyncModes;
-
-    // Prefer INCREMENTAL sync mode over other sync modes
-    if (supportedSyncModes.includes(SyncMode.Incremental)) {
-      updatedConfig.syncMode = SyncMode.Incremental;
-      updatedConfig.cursorField = streamNode.config.cursorField.length
-        ? streamNode.config.cursorField
-        : getDefaultCursorField(streamNode);
-    }
-
-    // If source syncMode is somehow nullable - just pick one from supportedSyncModes
-    if (!updatedConfig.syncMode) {
-      updatedConfig.syncMode = streamNode.stream.supportedSyncModes[0];
-    }
-
-    return {
-      ...streamNode,
-      config: updatedConfig,
-    };
-  }),
-});
-
-const getInitialTransformations = (operations: Operation[]): Transformation[] =>
-  operations.filter(isDbtTransformation);
-
-const getInitialNormalization = (
-  operations: Operation[],
+export const getInitialNormalization = (
+  operations?: Array<OperationRead | OperationCreate>,
   isEditMode?: boolean
 ): NormalizationType => {
-  let initialNormalization = operations.find(isNormalizationTransformation)
-    ?.operatorConfiguration?.normalization?.option;
+  const initialNormalization =
+    operations?.find(isNormalizationTransformation)?.operatorConfiguration?.normalization?.option;
 
-  // If no normalization was selected for already present normalization -> select Raw one
-  if (!initialNormalization && isEditMode) {
-    initialNormalization = NormalizationType.RAW;
-  }
-
-  return initialNormalization ?? NormalizationType.BASIC;
+  return initialNormalization
+    ? NormalizationType[initialNormalization]
+    : isEditMode
+    ? NormalizationType.raw
+    : NormalizationType.basic;
 };
 
-const useInitialValues = (
-  connection:
-    | Connection
-    | (Partial<Connection> &
-        Pick<Connection, "syncCatalog" | "source" | "destination">),
-  destDefinition: DestinationDefinitionSpecification,
+export const useInitialValues = (
+  connection: ConnectionOrPartialConnection,
+  destDefinition: DestinationDefinitionSpecificationRead,
   isEditMode?: boolean
 ): FormikConnectionFormValues => {
   const initialSchema = useMemo(
     () =>
-      calculateInitialCatalog(
-        connection.syncCatalog,
-        destDefinition,
-        isEditMode
-      ),
+      calculateInitialCatalog(connection.syncCatalog, destDefinition?.supportedDestinationSyncModes || [], isEditMode),
     [connection.syncCatalog, destDefinition, isEditMode]
   );
 
   return useMemo(() => {
     const initialValues: FormikConnectionFormValues = {
+      name: connection.name ?? `${connection.source.name} <> ${connection.destination.name}`,
       syncCatalog: initialSchema,
-      schedule: connection.schedule ?? {
-        units: 24,
-        timeUnit: ConnectionSchedule.Hours,
-      },
+      scheduleType: connection.connectionId ? connection.scheduleType : ConnectionScheduleType.basic,
+      scheduleData: connection.connectionId ? connection.scheduleData ?? null : DEFAULT_SCHEDULE,
       prefix: connection.prefix || "",
-      namespaceDefinition: connection.namespaceDefinition,
+      namespaceDefinition: connection.namespaceDefinition || NamespaceDefinitionType.source,
       namespaceFormat: connection.namespaceFormat ?? SOURCE_NAMESPACE_TAG,
     };
 
@@ -314,48 +270,74 @@ const useInitialValues = (
     }
 
     if (destDefinition.supportsNormalization) {
-      initialValues.normalization = getInitialNormalization(
-        operations,
-        isEditMode
-      );
+      initialValues.normalization = getInitialNormalization(operations, isEditMode);
     }
 
     return initialValues;
-  }, [initialSchema, connection, isEditMode, destDefinition]);
+  }, [
+    connection.connectionId,
+    connection.destination.name,
+    connection.name,
+    connection.namespaceDefinition,
+    connection.namespaceFormat,
+    connection.operations,
+    connection.prefix,
+    connection.scheduleData,
+    connection.scheduleType,
+    connection.source.name,
+    destDefinition.supportsDbt,
+    destDefinition.supportsNormalization,
+    initialSchema,
+    isEditMode,
+  ]);
 };
 
-const useFrequencyDropdownData = (): DropDownRow.IDataItem[] => {
+export const useFrequencyDropdownData = (
+  additionalFrequency: WebBackendConnectionRead["scheduleData"]
+): DropDownRow.IDataItem[] => {
   const { formatMessage } = useIntl();
 
-  return useMemo(
-    () =>
-      FrequencyConfig.map((item) => ({
-        value: item.config,
-        label:
-          item.config === null
-            ? item.text
-            : formatMessage(
-                {
-                  id: "form.every",
-                },
-                {
-                  value: item.simpleText || item.text,
-                }
-              ),
-      })),
-    [formatMessage]
-  );
-};
+  return useMemo(() => {
+    const frequencies = [...frequencyConfig];
+    if (additionalFrequency?.basicSchedule) {
+      const additionalFreqAlreadyPresent = frequencies.some(
+        (frequency) =>
+          frequency?.timeUnit === additionalFrequency.basicSchedule?.timeUnit &&
+          frequency?.units === additionalFrequency.basicSchedule?.units
+      );
+      if (!additionalFreqAlreadyPresent) {
+        frequencies.push(additionalFrequency.basicSchedule);
+      }
+    }
 
-export type { ConnectionFormValues, FormikConnectionFormValues };
-export {
-  connectionValidationSchema,
-  calculateInitialCatalog,
-  useInitialValues,
-  useFrequencyDropdownData,
-  mapFormPropsToOperation,
-  SUPPORTED_MODES,
-  useDefaultTransformation,
-  getInitialNormalization,
-  getInitialTransformations,
+    const basicFrequencies = frequencies.map((frequency) => ({
+      value: frequency,
+      label: formatMessage(
+        {
+          id: `form.every.${frequency.timeUnit}`,
+        },
+        { value: frequency.units }
+      ),
+    }));
+
+    // Add Manual and Custom to the frequencies list
+    const customFrequency = formatMessage({
+      id: "frequency.cron",
+    });
+    const manualFrequency = formatMessage({
+      id: "frequency.manual",
+    });
+    const otherFrequencies = [
+      {
+        label: manualFrequency,
+        value: manualFrequency.toLowerCase(),
+      },
+      {
+        label: customFrequency,
+        value: customFrequency.toLowerCase(),
+      },
+    ];
+
+    return [...otherFrequencies, ...basicFrequencies];
+  }, [formatMessage, additionalFrequency]);
 };

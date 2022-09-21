@@ -1,144 +1,116 @@
-import React, { Suspense, useMemo } from "react";
-import { FormattedMessage } from "react-intl";
-import styled from "styled-components";
 import { faRedoAlt } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import React, { Suspense, useCallback, useMemo } from "react";
+import { FormattedMessage } from "react-intl";
+import { useNavigate } from "react-router-dom";
 
-import { Button, ContentCard } from "components";
+import { Button, Card } from "components";
+import { JobItem } from "components/JobItem/JobItem";
 import LoadingSchema from "components/LoadingSchema";
-import JobItem from "components/JobItem";
-import ConnectionForm from "views/Connection/ConnectionForm";
-import TryAfterErrorBlock from "./components/TryAfterErrorBlock";
 
-import useConnection, { ValuesProps } from "hooks/services/useConnectionHook";
-import { useDiscoverSchema } from "hooks/services/useSchemaHook";
-import { IDataItem } from "components/base/DropDown/components/Option";
-import { useAnalyticsService } from "hooks/services/Analytics/useAnalyticsService";
 import { LogsRequestError } from "core/request/LogsRequestError";
-import { Destination, Source } from "core/domain/connector";
-import { Connection } from "core/domain/connection";
+import { ConnectionFormServiceProvider } from "hooks/services/Connection/ConnectionFormService";
+import { useChangedFormsById, useFormChangeTrackerService, useUniqueFormId } from "hooks/services/FormChangeTracker";
+import { useCreateConnection, ValuesProps } from "hooks/services/useConnectionHook";
+import { ConnectionForm } from "views/Connection/ConnectionForm";
 
-const SkipButton = styled.div`
-  margin-top: 6px;
+import { DestinationRead, SourceRead } from "../../core/request/AirbyteClient";
+import { useDiscoverSchema } from "../../hooks/services/useSourceHook";
+import TryAfterErrorBlock from "./components/TryAfterErrorBlock";
+import styles from "./CreateConnectionContent.module.scss";
 
-  & > button {
-    min-width: 239px;
-    margin-left: 9px;
-  }
-`;
+interface CreateConnectionContentProps {
+  source: SourceRead;
+  destination: DestinationRead;
+  afterSubmitConnection?: () => void;
+}
 
-const TryArrow = styled(FontAwesomeIcon)`
-  margin: 0 10px -1px 0;
-  font-size: 14px;
-`;
-
-type IProps = {
-  additionBottomControls?: React.ReactNode;
-  source: Source;
-  destination: Destination;
-  afterSubmitConnection?: (connection: Connection) => void;
-  noTitles?: boolean;
-};
-
-const CreateConnectionContent: React.FC<IProps> = ({
+const CreateConnectionContent: React.FC<CreateConnectionContentProps> = ({
   source,
   destination,
   afterSubmitConnection,
-  additionBottomControls,
-  noTitles,
 }) => {
-  const { createConnection } = useConnection();
-  const analyticsService = useAnalyticsService();
+  const { mutateAsync: createConnection } = useCreateConnection();
+  const navigate = useNavigate();
 
-  const {
-    schema,
-    isLoading,
-    schemaErrorStatus,
-    onDiscoverSchema,
-  } = useDiscoverSchema(source.sourceId);
+  const formId = useUniqueFormId();
+  const { clearFormChange } = useFormChangeTrackerService();
+  const [changedFormsById] = useChangedFormsById();
+  const formDirty = useMemo(() => !!changedFormsById?.[formId], [changedFormsById, formId]);
 
-  const connection = useMemo(
-    () => ({
-      syncCatalog: schema,
-      destination,
-      source,
-    }),
-    [schema, destination, source]
+  const { schema, isLoading, schemaErrorStatus, catalogId, onDiscoverSchema } = useDiscoverSchema(
+    source.sourceId,
+    true
   );
 
-  const onSubmitConnectionStep = async (values: ValuesProps) => {
-    const connection = await createConnection({
-      values,
-      source: source,
-      destination: destination,
-      sourceDefinition: {
-        name: source?.name ?? "",
-        sourceDefinitionId: source?.sourceDefinitionId ?? "",
-      },
-      destinationDefinition: {
-        name: destination?.name ?? "",
-        destinationDefinitionId: destination?.destinationDefinitionId ?? "",
-      },
-    });
-
-    if (afterSubmitConnection) {
-      afterSubmitConnection(connection);
-    }
+  const connection = {
+    syncCatalog: schema,
+    destination,
+    source,
+    catalogId,
   };
 
-  const onSelectFrequency = (item: IDataItem | null) => {
-    analyticsService.track("New Connection - Action", {
-      action: "Select a frequency",
-      frequency: item?.label,
-      connector_source_definition: source?.sourceName,
-      connector_source_definition_id: source?.sourceDefinitionId,
-      connector_destination_definition: destination?.destinationName,
-      connector_destination_definition_id: destination?.destinationDefinitionId,
-    });
-  };
+  const onSubmitConnectionStep = useCallback(
+    async (values: ValuesProps) => {
+      const createdConnection = await createConnection({
+        values,
+        source,
+        destination,
+        sourceDefinition: {
+          sourceDefinitionId: source?.sourceDefinitionId ?? "",
+        },
+        destinationDefinition: {
+          name: destination?.name ?? "",
+          destinationDefinitionId: destination?.destinationDefinitionId ?? "",
+        },
+        sourceCatalogId: catalogId,
+      });
+
+      // We only want to go to the new connection if we _do not_ have an after submit action.
+      if (!afterSubmitConnection) {
+        // We have to clear the form change to prevent the dirty-form tracking modal from appearing.
+        clearFormChange(formId);
+        // This is the "default behavior", go to the created connection.
+        navigate(`../../connections/${createdConnection.connectionId}`);
+      }
+    },
+    [afterSubmitConnection, catalogId, clearFormChange, createConnection, destination, formId, navigate, source]
+  );
 
   if (schemaErrorStatus) {
-    const jobInfo = LogsRequestError.extractJobInfo(schemaErrorStatus);
+    const job = LogsRequestError.extractJobInfo(schemaErrorStatus);
     return (
-      <ContentCard
-        title={
-          noTitles ? null : <FormattedMessage id="onboarding.setConnection" />
-        }
-      >
-        <TryAfterErrorBlock
-          onClick={onDiscoverSchema}
-          additionControl={<SkipButton>{additionBottomControls}</SkipButton>}
-        />
-        {jobInfo && <JobItem jobInfo={jobInfo} />}
-      </ContentCard>
+      <Card>
+        <TryAfterErrorBlock onClick={onDiscoverSchema} />
+        {job && <JobItem job={job} />}
+      </Card>
     );
   }
 
-  return (
-    <ContentCard
-      title={
-        noTitles ? null : <FormattedMessage id="onboarding.setConnection" />
-      }
-    >
-      {isLoading ? (
-        <LoadingSchema />
-      ) : (
-        <Suspense fallback={<LoadingSchema />}>
+  return isLoading ? (
+    <LoadingSchema />
+  ) : (
+    <Suspense fallback={<LoadingSchema />}>
+      <div className={styles.connectionFormContainer}>
+        <ConnectionFormServiceProvider
+          connection={connection}
+          mode="create"
+          formId={formId}
+          onSubmit={onSubmitConnectionStep}
+          onAfterSubmit={afterSubmitConnection}
+          formDirty={formDirty}
+        >
           <ConnectionForm
-            connection={connection}
-            additionBottomControls={additionBottomControls}
-            onDropDownSelect={onSelectFrequency}
             additionalSchemaControl={
               <Button onClick={onDiscoverSchema} type="button">
-                <TryArrow icon={faRedoAlt} />
+                <FontAwesomeIcon className={styles.tryArrowIcon} icon={faRedoAlt} />
                 <FormattedMessage id="connection.refreshSchema" />
               </Button>
             }
-            onSubmit={onSubmitConnectionStep}
           />
-        </Suspense>
-      )}
-    </ContentCard>
+        </ConnectionFormServiceProvider>
+      </div>
+    </Suspense>
   );
 };
 

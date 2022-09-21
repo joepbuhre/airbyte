@@ -11,6 +11,8 @@ export interface CloudWorkspace {
   billingUserId: string;
   remainingCredits: number;
   creditStatus?: CreditStatus;
+  lastCreditPurchaseIncrementTimestamp?: number | null;
+  trialExpiryTimestamp?: number | null;
 }
 
 export interface CreditConsumptionByConnector {
@@ -29,8 +31,8 @@ export interface CreditConsumptionByConnector {
 export interface CloudWorkspaceUsage {
   workspaceId: string;
   creditConsumptionByConnector: CreditConsumptionByConnector[];
-  creditConsumptionByDay: {
+  creditConsumptionByDay: Array<{
     date: [number, number, number];
     creditsConsumed: number;
-  }[];
+  }>;
 }

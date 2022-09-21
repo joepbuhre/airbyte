@@ -1,12 +1,11 @@
 import styled from "styled-components";
-
 import { Theme } from "theme";
 
-type IProps = {
+interface IProps {
   primary?: boolean;
   secondary?: boolean;
   fullText?: boolean;
-};
+}
 
 const setColor = (props: IProps & { theme: Theme }) => {
   if (props.primary) {
@@ -28,7 +27,6 @@ const Text = styled.div<IProps>`
   font-family: ${({ theme }) => theme.regularFont};
   font-style: normal;
   font-weight: normal;
-  max-width: 94%;
   color: ${(props) => setColor(props)};
 
   .rw-list-option.rw-state-selected & {

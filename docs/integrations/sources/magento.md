@@ -26,9 +26,11 @@ There is a dedicated Magento2 source connector. The Magento2 source connector is
 If there is for some reason the REST API doesn't work, or you use Magento1, then you can consider the next possibility.
 Magento runs on MySQL. You can use Airbyte to sync your Magento instance by connecting to the underlying database using the [MySQL connector](mysql.md).
 
-{% hint style="info" %}
+:::info
+
 Reach out to your service representative or system admin to find the parameters required to connect to the underlying database
-{% endhint %}
+
+:::
 
 ### Output schema
 

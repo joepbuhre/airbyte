@@ -1,14 +1,16 @@
 /*
- * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
+ * Copyright (c) 2022 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.commons.lang;
 
 import java.util.concurrent.Callable;
 import java.util.function.Function;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@Slf4j
 public class Exceptions {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(Exceptions.class);

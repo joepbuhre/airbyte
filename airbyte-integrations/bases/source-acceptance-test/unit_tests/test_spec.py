@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2021 Airbyte, Inc., all rights reserved.
+# Copyright (c) 2022 Airbyte, Inc., all rights reserved.
 #
 
 from typing import Any, Callable, Dict
@@ -7,6 +7,8 @@ from typing import Any, Callable, Dict
 import pytest
 from airbyte_cdk.models import ConnectorSpecification
 from source_acceptance_test.tests.test_core import TestSpec as _TestSpec
+
+from .conftest import does_not_raise
 
 
 @pytest.mark.parametrize(
@@ -255,6 +257,90 @@ def parametrize_test_case(*test_cases: Dict[str, Any]) -> Callable:
         },
         "should_fail": True,
     },
+    {
+        "test_id": "no_common_property_for_all_oneof_subobjects",
+        "connector_spec": {
+            "type": "object",
+            "properties": {
+                "credentials": {
+                    "type": "object",
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "option1": {"type": "string"},
+                                "option2": {"type": "string"},
+                            },
+                        },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "option3": {"type": "string"},
+                                "option4": {"type": "string"},
+                            },
+                        },
+                    ],
+                }
+            },
+        },
+        "should_fail": True,
+    },
+    {
+        "test_id": "two_common_properties_with_const_keyword",
+        "connector_spec": {
+            "type": "object",
+            "properties": {
+                "credentials": {
+                    "type": "object",
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "common1": {"type": "string", "const": "common1"},
+                                "common2": {"type": "string", "const": "common2"},
+                            },
+                        },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "common1": {"type": "string", "const": "common1"},
+                                "common2": {"type": "string", "const": "common2"},
+                            },
+                        },
+                    ],
+                }
+            },
+        },
+        "should_fail": True,
+    },
+    {
+        "test_id": "default_keyword_in_common_property",
+        "connector_spec": {
+            "type": "object",
+            "properties": {
+                "credentials": {
+                    "type": "object",
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "common": {"type": "string", "const": "option1", "default": "option1"},
+                                "option1": {"type": "string"},
+                            },
+                        },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "common": {"type": "string", "const": "option2", "default": "option2"},
+                                "option2": {"type": "string"},
+                            },
+                        },
+                    ],
+                }
+            },
+        },
+        "should_fail": True,
+    },
 )
 def test_oneof_usage(connector_spec, should_fail):
     t = _TestSpec()
@@ -483,3 +569,39 @@ def test_validate_oauth_flow(connector_spec, expected_error):
             t.test_oauth_flow_parameters(connector_spec)
     else:
         t.test_oauth_flow_parameters(connector_spec)
+
+
+@pytest.mark.parametrize(
+    "connector_spec, expectation",
+    [
+        (ConnectorSpecification(connectionSpecification={}), does_not_raise()),
+        (ConnectorSpecification(connectionSpecification={"type": "object", "additionalProperties": True}), does_not_raise()),
+        (ConnectorSpecification(connectionSpecification={"type": "object", "additionalProperties": False}), pytest.raises(AssertionError)),
+        (
+            ConnectorSpecification(
+                connectionSpecification={
+                    "type": "object",
+                    "additionalProperties": True,
+                    "properties": {"my_object": {"type": "object", "additionalProperties": "foo"}},
+                }
+            ),
+            pytest.raises(AssertionError),
+        ),
+        (
+            ConnectorSpecification(
+                connectionSpecification={
+                    "type": "object",
+                    "additionalProperties": True,
+                    "properties": {
+                        "my_oneOf_object": {"type": "object", "oneOf": [{"additionalProperties": True}, {"additionalProperties": False}]}
+                    },
+                }
+            ),
+            pytest.raises(AssertionError),
+        ),
+    ],
+)
+def test_additional_properties_is_true(connector_spec, expectation):
+    t = _TestSpec()
+    with expectation:
+        t.test_additional_properties_is_true(connector_spec)

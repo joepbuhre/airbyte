@@ -1,15 +1,15 @@
-import React from "react";
-import styled from "styled-components";
 import { faTimes } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import React from "react";
+import styled from "styled-components";
 
-import Modal from "components/Modal";
 import { Button } from "components/base";
+import Modal from "components/Modal";
 
-type ShowVideoProps = {
+interface ShowVideoProps {
   videoId?: string;
   onClose: () => void;
-};
+}
 
 const CloseButton = styled(Button)`
   position: absolute;
@@ -25,7 +25,7 @@ const CloseButton = styled(Button)`
 
 const ShowVideo: React.FC<ShowVideoProps> = ({ videoId, onClose }) => {
   return (
-    <Modal onClose={onClose} clear closeOnBackground>
+    <Modal onClose={onClose} cardless>
       <CloseButton onClick={onClose} iconOnly>
         <FontAwesomeIcon icon={faTimes} />
       </CloseButton>

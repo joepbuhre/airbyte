@@ -1,29 +1,35 @@
 import React from "react";
-import { Props } from "react-select";
-import { SelectComponentsConfig } from "react-select/src/components";
-import { CSSObject } from "styled-components";
-
-import DropdownIndicator from "./components/DropdownIndicator";
-import Menu from "./components/Menu";
-import SingleValue from "./components/SingleValue";
-import Option, { IDataItem } from "./components/Option";
+import { CSSObjectWithLabel, GroupBase, Props, SelectComponentsConfig, StylesConfig } from "react-select";
+import Select from "react-select/dist/declarations/src/Select";
 
 import { equal, naturalComparatorBy } from "utils/objects";
-import { SelectContainer } from "./SelectContainer";
+
+import { DropdownIndicator } from "./components/DropdownIndicator";
+import Menu from "./components/Menu";
+import Option, { IDataItem } from "./components/Option";
+import SingleValue from "./components/SingleValue";
 import { CustomSelect } from "./CustomSelect";
+import { SelectContainer } from "./SelectContainer";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type OptionType = any;
-type DropdownProps = Props<OptionType> & {
+
+export interface DropdownProps<T = unknown> extends Props<OptionType> {
   withBorder?: boolean;
+  $withBorder?: boolean;
   fullText?: boolean;
   error?: boolean;
-};
+  selectProps?: T;
+}
 
-const DropDown: React.FC<DropdownProps> = React.forwardRef((props, ref) => {
+// eslint-disable-next-line react/function-component-definition
+function DropDownInner<T = unknown>(
+  props: DropdownProps<T>,
+  ref: React.ForwardedRef<Select<unknown, boolean, GroupBase<unknown>>>
+) {
   const propsComponents = props.components;
 
-  const components = React.useMemo<SelectComponentsConfig<OptionType, boolean>>(
+  const components = React.useMemo<SelectComponentsConfig<OptionType, boolean, GroupBase<unknown>>>(
     () =>
       ({
         DropdownIndicator,
@@ -44,29 +50,28 @@ const DropDown: React.FC<DropdownProps> = React.forwardRef((props, ref) => {
   const currentValue =
     props.value !== undefined
       ? props.isMulti
-        ? props.options?.filter((op) =>
-            props.value.find((o: OptionType) => equal(o, op.value))
-          )
+        ? props.options?.filter((op) => props.value.find((o: OptionType) => equal(o, op.value)))
         : props.options?.find((op) => equal(op.value, props.value))
       : null;
 
-  const styles = {
+  const styles: StylesConfig = {
     ...(props.styles ?? {}),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    menuPortal: (base: CSSObject, menuPortalProps: any) => ({
+    menuPortal: (base: CSSObjectWithLabel, menuPortalProps: any) => ({
       ...(props.styles?.menuPortal?.(base, menuPortalProps) ?? { ...base }),
       zIndex: 9999,
     }),
   };
-
   return (
     <CustomSelect
       ref={ref}
       data-testid={props.name}
       $error={props.error}
+      menuPlacement="auto"
+      menuPosition="fixed"
+      menuShouldBlockScroll
       className="react-select-container"
       classNamePrefix="react-select"
-      menuPortalTarget={document.body}
       placeholder="..."
       isSearchable={false}
       closeMenuOnSelect={!props.isMulti}
@@ -77,12 +82,8 @@ const DropDown: React.FC<DropdownProps> = React.forwardRef((props, ref) => {
       components={components}
     />
   );
-});
+}
 
-const defaultDataItemSort = naturalComparatorBy<IDataItem>(
-  (dataItem) => dataItem.label || ""
-);
+export const defaultDataItemSort = naturalComparatorBy<IDataItem>((dataItem) => dataItem.label || "");
 
-export default DropDown;
-export { DropDown, defaultDataItemSort };
-export type { DropdownProps };
+export const DropDown = React.forwardRef(DropDownInner);

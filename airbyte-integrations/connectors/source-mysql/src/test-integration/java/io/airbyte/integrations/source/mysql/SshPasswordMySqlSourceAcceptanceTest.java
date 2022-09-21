@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
+ * Copyright (c) 2022 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.integrations.source.mysql;
@@ -10,7 +10,7 @@ public class SshPasswordMySqlSourceAcceptanceTest extends AbstractSshMySqlSource
 
   @Override
   public Path getConfigFilePath() {
-    return Path.of("secrets/ssh-pwd-config.json");
+    return Path.of("secrets/ssh-pwd-repl-config.json");
   }
 
 }

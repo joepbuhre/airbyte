@@ -1,13 +1,15 @@
-import React, { useState } from "react";
-import { useDebounce } from "react-use";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faLink } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import React, { useState } from "react";
+import { FormattedMessage, useIntl } from "react-intl";
+import { useDebounce } from "react-use";
 
 import { Button } from "components";
-import ToolTip from "components/ToolTip";
+import { Tooltip } from "components/base/Tooltip";
+
 import { copyToClipboard } from "utils/clipboard";
+
 import { buildAttemptLink } from "../attemptLinkUtils";
-import { FormattedMessage, useIntl } from "react-intl";
 
 interface Props {
   jobId: string | number;
@@ -18,9 +20,7 @@ export const LinkToAttemptButton: React.FC<Props> = ({ jobId, attemptId }) => {
   const { formatMessage } = useIntl();
 
   const [showCopyTooltip, setShowCopyTooltip] = useState(false);
-  const [hideTooltip] = useDebounce(() => setShowCopyTooltip(false), 3000, [
-    showCopyTooltip,
-  ]);
+  const [hideTooltip] = useDebounce(() => setShowCopyTooltip(false), 3000, [showCopyTooltip]);
 
   const onCopyLink = async () => {
     // Get the current URL and replace (or add) hash to current log
@@ -33,7 +33,7 @@ export const LinkToAttemptButton: React.FC<Props> = ({ jobId, attemptId }) => {
   };
 
   return (
-    <ToolTip
+    <Tooltip
       disabled={!showCopyTooltip}
       control={
         <Button
@@ -47,6 +47,6 @@ export const LinkToAttemptButton: React.FC<Props> = ({ jobId, attemptId }) => {
       }
     >
       <FormattedMessage id="connection.linkCopied" />
-    </ToolTip>
+    </Tooltip>
   );
 };

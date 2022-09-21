@@ -3,7 +3,7 @@ import styled from "styled-components";
 
 import Label from "components/Label";
 
-export type ControlLabelsProps = {
+export interface ControlLabelsProps {
   className?: string;
   error?: boolean;
   success?: boolean;
@@ -12,14 +12,14 @@ export type ControlLabelsProps = {
   errorMessage?: React.ReactNode;
   labelAdditionLength?: number;
   label?: React.ReactNode;
-};
+}
 
 const ControlContainer = styled.div`
   width: 100%;
   display: inline-block;
 `;
 
-const ControlLabels: React.FC<ControlLabelsProps> = (props) => (
+const ControlLabels: React.FC<React.PropsWithChildren<ControlLabelsProps>> = (props) => (
   <ControlContainer className={props.className}>
     <Label
       error={props.error}

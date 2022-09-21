@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
+ * Copyright (c) 2022 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.integrations.base;
@@ -12,6 +12,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,6 +38,7 @@ import io.airbyte.validation.json.JsonSchemaValidator;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -260,7 +262,7 @@ class IntegrationRunnerTest {
             .withData(Jsons.deserialize("{ \"checkpoint\": \"1\" }")));
     System.setIn(new ByteArrayInputStream((Jsons.serialize(message1) + "\n"
         + Jsons.serialize(message2) + "\n"
-        + Jsons.serialize(stateMessage)).getBytes()));
+        + Jsons.serialize(stateMessage)).getBytes(StandardCharsets.UTF_8)));
 
     try (final AirbyteMessageConsumer airbyteMessageConsumerMock = mock(AirbyteMessageConsumer.class)) {
       IntegrationRunner.consumeWriteStream(airbyteMessageConsumerMock);
@@ -285,7 +287,7 @@ class IntegrationRunnerTest {
             .withData(Jsons.deserialize("{ \"color\": \"yellow\" }"))
             .withStream(STREAM_NAME)
             .withEmittedAt(EMITTED_AT));
-    System.setIn(new ByteArrayInputStream((Jsons.serialize(message1) + "\n" + Jsons.serialize(message2)).getBytes()));
+    System.setIn(new ByteArrayInputStream((Jsons.serialize(message1) + "\n" + Jsons.serialize(message2)).getBytes(StandardCharsets.UTF_8)));
 
     try (final AirbyteMessageConsumer airbyteMessageConsumerMock = mock(AirbyteMessageConsumer.class)) {
       doThrow(new IOException("error")).when(airbyteMessageConsumerMock).accept(message1);
@@ -306,7 +308,6 @@ class IntegrationRunnerTest {
           throw new IOException("random error");
         },
         Assertions::fail,
-        false,
         3, TimeUnit.SECONDS,
         10, TimeUnit.SECONDS));
     try {
@@ -333,7 +334,6 @@ class IntegrationRunnerTest {
           throw new IOException("random error");
         },
         () -> exitCalled.set(true),
-        false,
         3, TimeUnit.SECONDS,
         10, TimeUnit.SECONDS));
     try {
@@ -376,6 +376,50 @@ class IntegrationRunnerTest {
     assertEquals("dev", IntegrationRunner.parseConnectorVersion("airbyte/destination-test:dev"));
     assertEquals("1.0.1-alpha", IntegrationRunner.parseConnectorVersion("destination-test:1.0.1-alpha"));
     assertEquals("1.0.1-alpha", IntegrationRunner.parseConnectorVersion(":1.0.1-alpha"));
+  }
+
+  @Test
+  void testConsumptionOfInvalidStateMessage() {
+    final String invalidStateMessage = """
+                                       {
+                                         "type" : "STATE",
+                                         "state" : {
+                                           "type": "NOT_RECOGNIZED",
+                                           "global": {
+                                             "streamStates": {
+                                               "foo" : "bar"
+                                             }
+                                           }
+                                         }
+                                       }
+                                       """;
+
+    Assertions.assertThrows(IllegalStateException.class, () -> {
+      try (final AirbyteMessageConsumer consumer = mock(AirbyteMessageConsumer.class)) {
+        IntegrationRunner.consumeMessage(consumer, invalidStateMessage);
+      }
+    });
+  }
+
+  @Test
+  void testConsumptionOfInvalidNonStateMessage() {
+    final String invalidNonStateMessage = """
+                                          {
+                                            "type" : "NOT_RECOGNIZED",
+                                            "record" : {
+                                              "namespace": "namespace",
+                                              "stream": "stream",
+                                              "emittedAt": 123456789
+                                            }
+                                          }
+                                          """;
+
+    Assertions.assertDoesNotThrow(() -> {
+      try (final AirbyteMessageConsumer consumer = mock(AirbyteMessageConsumer.class)) {
+        IntegrationRunner.consumeMessage(consumer, invalidNonStateMessage);
+        verify(consumer, times(0)).accept(any(AirbyteMessage.class));
+      }
+    });
   }
 
 }

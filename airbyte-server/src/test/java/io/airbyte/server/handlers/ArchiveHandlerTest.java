@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
+ * Copyright (c) 2022 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.server.handlers;
@@ -11,41 +11,53 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import io.airbyte.api.model.ImportRead;
-import io.airbyte.api.model.ImportRead.StatusEnum;
-import io.airbyte.api.model.ImportRequestBody;
-import io.airbyte.api.model.UploadRead;
-import io.airbyte.api.model.WorkspaceIdRequestBody;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.airbyte.api.model.generated.ImportRead;
+import io.airbyte.api.model.generated.ImportRead.StatusEnum;
+import io.airbyte.api.model.generated.ImportRequestBody;
+import io.airbyte.api.model.generated.UploadRead;
+import io.airbyte.api.model.generated.WorkspaceIdRequestBody;
 import io.airbyte.commons.io.FileTtlManager;
 import io.airbyte.commons.json.Jsons;
 import io.airbyte.commons.string.Strings;
 import io.airbyte.commons.version.AirbyteVersion;
+import io.airbyte.config.ActorCatalog;
 import io.airbyte.config.ConfigSchema;
 import io.airbyte.config.DestinationConnection;
 import io.airbyte.config.Notification;
 import io.airbyte.config.Notification.NotificationType;
 import io.airbyte.config.SlackNotificationConfiguration;
 import io.airbyte.config.SourceConnection;
+import io.airbyte.config.StandardDestinationDefinition;
 import io.airbyte.config.StandardSourceDefinition;
 import io.airbyte.config.StandardSourceDefinition.SourceType;
+import io.airbyte.config.StandardSync;
 import io.airbyte.config.StandardWorkspace;
 import io.airbyte.config.init.YamlSeedConfigPersistence;
 import io.airbyte.config.persistence.ConfigPersistence;
 import io.airbyte.config.persistence.ConfigRepository;
 import io.airbyte.config.persistence.DatabaseConfigPersistence;
+import io.airbyte.config.persistence.SecretsRepositoryReader;
+import io.airbyte.config.persistence.SecretsRepositoryWriter;
+import io.airbyte.config.persistence.split_secrets.JsonSecretsProcessor;
 import io.airbyte.config.persistence.split_secrets.NoOpSecretsHydrator;
 import io.airbyte.db.Database;
+import io.airbyte.db.factory.DSLContextFactory;
+import io.airbyte.db.factory.DataSourceFactory;
 import io.airbyte.db.instance.test.TestDatabaseProviders;
+import io.airbyte.persistence.job.DefaultJobPersistence;
+import io.airbyte.persistence.job.JobPersistence;
+import io.airbyte.persistence.job.WorkspaceHelper;
+import io.airbyte.protocol.models.ConfiguredAirbyteCatalog;
 import io.airbyte.protocol.models.ConnectorSpecification;
-import io.airbyte.scheduler.persistence.DefaultJobPersistence;
-import io.airbyte.scheduler.persistence.JobPersistence;
-import io.airbyte.scheduler.persistence.WorkspaceHelper;
+import io.airbyte.test.utils.DatabaseConnectionHelper;
 import io.airbyte.validation.json.JsonValidationException;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -53,6 +65,9 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import javax.sql.DataSource;
+import org.jooq.DSLContext;
+import org.jooq.SQLDialect;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -64,21 +79,26 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 import org.testcontainers.shaded.org.apache.commons.io.FileUtils;
 
-public class ArchiveHandlerTest {
+class ArchiveHandlerTest {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(ArchiveHandlerTest.class);
 
   private static final AirbyteVersion VERSION = new AirbyteVersion("0.6.8");
   private static PostgreSQLContainer<?> container;
 
+  private DataSource dataSource;
+  private DSLContext dslContext;
   private Database jobDatabase;
   private Database configDatabase;
   private JobPersistence jobPersistence;
-  private DatabaseConfigPersistence configPersistence;
+  private SecretsRepositoryReader secretsRepositoryReader;
+  private SecretsRepositoryWriter secretsRepositoryWriter;
+  private ConfigPersistence configPersistence;
   private ConfigPersistence seedPersistence;
-
+  private JsonSecretsProcessor jsonSecretsProcessor;
   private ConfigRepository configRepository;
   private ArchiveHandler archiveHandler;
+  private WorkspaceHelper workspaceHelper;
 
   private static class NoOpFileTtlManager extends FileTtlManager {
 
@@ -86,12 +106,13 @@ public class ArchiveHandlerTest {
       super(1L, TimeUnit.MINUTES, 1L);
     }
 
+    @Override
     public void register(final Path path) {}
 
   }
 
   @BeforeAll
-  public static void dbSetup() {
+  static void dbSetup() {
     container = new PostgreSQLContainer<>("postgres:13-alpine")
         .withDatabaseName("airbyte")
         .withUsername("docker")
@@ -100,38 +121,50 @@ public class ArchiveHandlerTest {
   }
 
   @AfterAll
-  public static void dbDown() {
+  static void dbDown() {
     container.close();
   }
 
   @BeforeEach
-  public void setup() throws Exception {
-    final TestDatabaseProviders databaseProviders = new TestDatabaseProviders(container);
+  void setup() throws Exception {
+    dataSource = DatabaseConnectionHelper.createDataSource(container);
+    dslContext = DSLContextFactory.create(dataSource, SQLDialect.POSTGRES);
+    final TestDatabaseProviders databaseProviders = new TestDatabaseProviders(dataSource, dslContext);
     jobDatabase = databaseProviders.createNewJobsDatabase();
     configDatabase = databaseProviders.createNewConfigsDatabase();
     jobPersistence = new DefaultJobPersistence(jobDatabase);
-    seedPersistence = YamlSeedConfigPersistence.getDefault();
-    configPersistence = new DatabaseConfigPersistence(jobDatabase);
+    seedPersistence = new YamlSeedConfigPersistence(YamlSeedConfigPersistence.DEFAULT_SEED_DEFINITION_RESOURCE_CLASS);
+    jsonSecretsProcessor = JsonSecretsProcessor.builder()
+        .maskSecrets(false)
+        .copySecrets(false)
+        .build();
+    configPersistence = new DatabaseConfigPersistence(jobDatabase, jsonSecretsProcessor);
     configPersistence.replaceAllConfigs(Collections.emptyMap(), false);
     configPersistence.loadData(seedPersistence);
-    configRepository = new ConfigRepository(configPersistence, new NoOpSecretsHydrator(), Optional.empty(), Optional.empty(), configDatabase);
+    configRepository = new ConfigRepository(configPersistence, configDatabase);
+    secretsRepositoryReader = new SecretsRepositoryReader(configRepository, new NoOpSecretsHydrator());
+    secretsRepositoryWriter = new SecretsRepositoryWriter(configRepository, Optional.empty(), Optional.empty());
 
     jobPersistence.setVersion(VERSION.serialize());
+
+    workspaceHelper = new WorkspaceHelper(configRepository, jobPersistence);
 
     archiveHandler = new ArchiveHandler(
         VERSION,
         configRepository,
+        secretsRepositoryReader,
+        secretsRepositoryWriter,
         jobPersistence,
-        YamlSeedConfigPersistence.getDefault(),
-        new WorkspaceHelper(configRepository, jobPersistence),
+        seedPersistence,
+        workspaceHelper,
         new NoOpFileTtlManager(),
         true);
   }
 
   @AfterEach
   void tearDown() throws Exception {
-    jobDatabase.close();
-    configDatabase.close();
+    dslContext.close();
+    DataSourceFactory.close(dataSource);
   }
 
   /**
@@ -139,21 +172,21 @@ public class ArchiveHandlerTest {
    */
   @Test
   void testFullExportImportRoundTrip() throws Exception {
-    assertSameConfigDump(seedPersistence.dumpConfigs(), configRepository.dumpConfigs());
+    assertSameConfigDump(seedPersistence.dumpConfigs(), secretsRepositoryReader.dumpConfigsWithSecrets());
 
     // Export the configs.
     File archive = archiveHandler.exportData();
 
     // After deleting the configs, the dump becomes empty.
     configPersistence.replaceAllConfigs(Collections.emptyMap(), false);
-    assertSameConfigDump(Collections.emptyMap(), configRepository.dumpConfigs());
+    assertSameConfigDump(Collections.emptyMap(), secretsRepositoryReader.dumpConfigsWithSecrets());
 
     // After importing the configs, the dump is restored.
     assertTrue(archive.exists());
     final ImportRead importResult = archiveHandler.importData(archive);
     assertFalse(archive.exists());
     assertEquals(StatusEnum.SUCCEEDED, importResult.getStatus());
-    assertSameConfigDump(seedPersistence.dumpConfigs(), configRepository.dumpConfigs());
+    assertSameConfigDump(seedPersistence.dumpConfigs(), secretsRepositoryReader.dumpConfigsWithSecrets());
 
     // When a connector definition is in use, it will not be updated.
     final UUID sourceS3DefinitionId = UUID.fromString("69589781-7828-43c5-9f63-8925b1c1ccc2");
@@ -170,7 +203,7 @@ public class ArchiveHandlerTest {
         .withSendOnFailure(true)
         .withSendOnSuccess(true)
         .withSlackConfiguration(new SlackNotificationConfiguration().withWebhook("webhook-url"));
-    final StandardWorkspace standardWorkspace = new StandardWorkspace()
+    final StandardWorkspace workspace = new StandardWorkspace()
         .withWorkspaceId(UUID.randomUUID())
         .withCustomerId(UUID.randomUUID())
         .withName("test-workspace")
@@ -185,18 +218,55 @@ public class ArchiveHandlerTest {
         .withNotifications(Collections.singletonList(notification))
         .withFirstCompletedSync(true)
         .withFeedbackDone(true);
-    final SourceConnection sourceConnection = new SourceConnection()
+    final SourceConnection source = new SourceConnection()
         .withSourceDefinitionId(sourceS3DefinitionId)
         .withSourceId(UUID.randomUUID())
-        .withWorkspaceId(standardWorkspace.getWorkspaceId())
+        .withWorkspaceId(workspace.getWorkspaceId())
         .withName("Test source")
         .withConfiguration(Jsons.deserialize("{}"))
         .withTombstone(false);
 
+    final StandardDestinationDefinition DESTINATION_S3 = new StandardDestinationDefinition()
+        .withName("S3")
+        .withDestinationDefinitionId(UUID.fromString("4816b78f-1489-44c1-9060-4b19d5fa9362"))
+        .withDockerRepository("airbyte/destination-s3")
+        .withDockerImageTag("0.1.12")
+        .withSpec(sourceS3Definition.getSpec())
+        .withDocumentationUrl("https://docs.airbyte.io/integrations/destinations/s3")
+        .withTombstone(false);
+
+    final DestinationConnection destination = new DestinationConnection()
+        .withName("Destination")
+        .withDestinationId(UUID.randomUUID())
+        .withDestinationDefinitionId(DESTINATION_S3.getDestinationDefinitionId())
+        .withConfiguration(Jsons.deserialize("{}"))
+        .withWorkspaceId(workspace.getWorkspaceId());
+
+    final ActorCatalog actorCatalog = new ActorCatalog()
+        .withId(UUID.randomUUID())
+        .withCatalog(Jsons.deserialize("{}"))
+        .withCatalogHash("");
+
+    final StandardSync sync = new StandardSync()
+        .withName("Connection")
+        .withConnectionId(UUID.randomUUID())
+        .withSourceId(source.getSourceId())
+        .withDestinationId(destination.getDestinationId())
+        .withCatalog(new ConfiguredAirbyteCatalog().withStreams(List.of()))
+        .withSourceCatalogId(actorCatalog.getId())
+        .withManual(true);
+
     // Write source connection and an old source definition.
-    configPersistence.writeConfig(ConfigSchema.STANDARD_WORKSPACE, standardWorkspace.getWorkspaceId().toString(), standardWorkspace);
-    configPersistence.writeConfig(ConfigSchema.SOURCE_CONNECTION, sourceConnection.getSourceId().toString(), sourceConnection);
+    configPersistence.writeConfig(ConfigSchema.STANDARD_WORKSPACE, workspace.getWorkspaceId().toString(), workspace);
     configPersistence.writeConfig(ConfigSchema.STANDARD_SOURCE_DEFINITION, sourceS3DefinitionId.toString(), sourceS3Definition);
+    configPersistence.writeConfig(ConfigSchema.SOURCE_CONNECTION, source.getSourceId().toString(), source);
+
+    configPersistence.writeConfig(ConfigSchema.ACTOR_CATALOG, actorCatalog.getId().toString(), actorCatalog);
+    configPersistence.writeConfig(ConfigSchema.STANDARD_DESTINATION_DEFINITION, DESTINATION_S3.getDestinationDefinitionId().toString(),
+        DESTINATION_S3);
+    configPersistence.writeConfig(ConfigSchema.DESTINATION_CONNECTION, destination.getDestinationId().toString(), destination);
+
+    configPersistence.writeConfig(ConfigSchema.STANDARD_SYNC, sync.getConnectionId().toString(), sync);
 
     // Export, wipe, and import the configs.
     archive = archiveHandler.exportData();
@@ -213,12 +283,12 @@ public class ArchiveHandlerTest {
 
   @Test
   void testLightWeightExportImportRoundTrip() throws Exception {
-    assertSameConfigDump(seedPersistence.dumpConfigs(), configRepository.dumpConfigs());
+    assertSameConfigDump(seedPersistence.dumpConfigs(), secretsRepositoryReader.dumpConfigsWithSecrets());
 
     // Insert some workspace data
     final UUID workspaceId = UUID.randomUUID();
     setupTestData(workspaceId);
-    final Map<String, Stream<JsonNode>> workspaceDump = configRepository.dumpConfigs();
+    final Map<String, Stream<JsonNode>> workspaceDump = secretsRepositoryReader.dumpConfigsWithSecrets();
 
     // Insert some other workspace data
     setupTestData(UUID.randomUUID());
@@ -230,11 +300,11 @@ public class ArchiveHandlerTest {
 
     // After deleting all the configs, the dump becomes empty.
     configPersistence.replaceAllConfigs(Collections.emptyMap(), false);
-    assertSameConfigDump(Collections.emptyMap(), configRepository.dumpConfigs());
+    assertSameConfigDump(Collections.emptyMap(), secretsRepositoryReader.dumpConfigsWithSecrets());
 
     // Restore default seed data
     configPersistence.loadData(seedPersistence);
-    assertSameConfigDump(seedPersistence.dumpConfigs(), configRepository.dumpConfigs());
+    assertSameConfigDump(seedPersistence.dumpConfigs(), secretsRepositoryReader.dumpConfigsWithSecrets());
 
     setupWorkspaceData(workspaceId);
 
@@ -247,11 +317,11 @@ public class ArchiveHandlerTest {
         .resourceId(uploadRead.getResourceId())
         .workspaceId(workspaceId));
     assertEquals(StatusEnum.SUCCEEDED, importResult.getStatus());
-    assertSameConfigDump(workspaceDump, configRepository.dumpConfigs());
+    assertSameConfigDump(workspaceDump, secretsRepositoryReader.dumpConfigsWithSecrets());
 
     // we modify first workspace
     setupTestData(workspaceId);
-    final Map<String, Stream<JsonNode>> secondWorkspaceDump = configRepository.dumpConfigs();
+    final Map<String, Stream<JsonNode>> secondWorkspaceDump = secretsRepositoryReader.dumpConfigsWithSecrets();
 
     final UUID secondWorkspaceId = UUID.randomUUID();
     setupWorkspaceData(secondWorkspaceId);
@@ -264,7 +334,7 @@ public class ArchiveHandlerTest {
         .workspaceId(secondWorkspaceId));
     assertEquals(StatusEnum.SUCCEEDED, secondImportResult.getStatus());
 
-    final UUID secondSourceId = configRepository.listSourceConnectionWithSecrets()
+    final UUID secondSourceId = secretsRepositoryReader.listSourceConnectionWithSecrets()
         .stream()
         .filter(sourceConnection -> secondWorkspaceId.equals(sourceConnection.getWorkspaceId()))
         .map(SourceConnection::getSourceId)
@@ -293,7 +363,7 @@ public class ArchiveHandlerTest {
     when(emptyConnectorSpec.getConnectionSpecification()).thenReturn(Jsons.emptyObject());
 
     configRepository.writeStandardSourceDefinition(standardSourceDefinition);
-    configRepository.writeSourceConnection(sourceConnection, emptyConnectorSpec);
+    secretsRepositoryWriter.writeSourceConnection(sourceConnection, emptyConnectorSpec);
 
     // check that first workspace is unchanged even though modifications were made to second workspace
     // (that contains similar connections from importing the same archive)
@@ -307,7 +377,7 @@ public class ArchiveHandlerTest {
         .resourceId(uploadRead.getResourceId())
         .workspaceId(workspaceId));
     assertEquals(StatusEnum.SUCCEEDED, importResult.getStatus());
-    assertSameConfigDump(secondWorkspaceDump, configRepository.dumpConfigs());
+    assertSameConfigDump(secondWorkspaceDump, secretsRepositoryReader.dumpConfigsWithSecrets());
   }
 
   private void setupWorkspaceData(final UUID workspaceId) throws IOException, JsonValidationException {
@@ -351,7 +421,7 @@ public class ArchiveHandlerTest {
       final Set<JsonNode> actualRecords = actual.get(stream).collect(Collectors.toSet());
       for (final var expectedRecord : expectedRecords) {
         assertTrue(
-            actualRecords.contains(expectedRecord),
+            backwardCompatibleContains(actualRecords, expectedRecord),
             String.format(
                 "\n Expected record was not found:\n%s\n Actual records were:\n%s\n",
                 expectedRecord,
@@ -363,6 +433,22 @@ public class ArchiveHandlerTest {
               Strings.join(expectedRecords, "\n"),
               Strings.join(actualRecords, "\n")));
     }
+  }
+
+  /*
+   * The protocol version is currently optional and defaults to 0.2.0 To reflect that today we need to
+   * support connectors without protocol version in the spec, we add a secondary check with the
+   * default protocol version
+   */
+  private boolean backwardCompatibleContains(final Set<JsonNode> actualRecords, final JsonNode expectedRecord) {
+    return actualRecords.contains(expectedRecord) ||
+        (!expectedRecord.has("protocolVersion") && actualRecords.contains(cloneWithDefaultVersion(expectedRecord)));
+  }
+
+  private JsonNode cloneWithDefaultVersion(final JsonNode json) {
+    final ObjectNode clonedJson = json.deepCopy();
+    clonedJson.put("protocolVersion", "0.2.0");
+    return clonedJson;
   }
 
 }

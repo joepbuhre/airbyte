@@ -1,27 +1,26 @@
 import React from "react";
 import { FormattedMessage } from "react-intl";
-import { useResource } from "rest-hooks";
+import { useNavigate } from "react-router-dom";
 
 import { Button, MainPageWithScroll } from "components";
-import { RoutePaths } from "pages/routes";
-import PageTitle from "components/PageTitle";
-import useRouter from "hooks/useRouter";
-import DestinationsTable from "./components/DestinationsTable";
-import DestinationResource from "core/resources/Destination";
+import { EmptyResourceListView } from "components/EmptyResourceListView";
 import HeadTitle from "components/HeadTitle";
-import Placeholder, { ResourceTypes } from "components/Placeholder";
-import useWorkspace from "hooks/services/useWorkspace";
+import PageTitle from "components/PageTitle";
+
+import { useTrackPage, PageTrackingCodes } from "hooks/services/Analytics";
+import { useDestinationList } from "hooks/services/useDestinationHook";
+
+import { RoutePaths } from "../../../routePaths";
+import DestinationsTable from "./components/DestinationsTable";
 
 const AllDestinationsPage: React.FC = () => {
-  const { push } = useRouter();
-  const { workspace } = useWorkspace();
-  const { destinations } = useResource(DestinationResource.listShape(), {
-    workspaceId: workspace.workspaceId,
-  });
+  const navigate = useNavigate();
+  const { destinations } = useDestinationList();
+  useTrackPage(PageTrackingCodes.DESTINATION_LIST);
 
-  const onCreateDestination = () => push(`${RoutePaths.DestinationNew}`);
+  const onCreateDestination = () => navigate(`${RoutePaths.DestinationNew}`);
 
-  return (
+  return destinations.length ? (
     <MainPageWithScroll
       headTitle={<HeadTitle titles={[{ id: "admin.destinations" }]} />}
       pageTitle={
@@ -29,18 +28,16 @@ const AllDestinationsPage: React.FC = () => {
           title={<FormattedMessage id="admin.destinations" />}
           endComponent={
             <Button onClick={onCreateDestination} data-id="new-destination">
-              <FormattedMessage id="destination.newDestination" />
+              <FormattedMessage id="destinations.newDestination" />
             </Button>
           }
         />
       }
     >
-      {destinations.length ? (
-        <DestinationsTable destinations={destinations} />
-      ) : (
-        <Placeholder resource={ResourceTypes.Destinations} />
-      )}
+      <DestinationsTable destinations={destinations} />
     </MainPageWithScroll>
+  ) : (
+    <EmptyResourceListView resourceType="destinations" onCreateClick={onCreateDestination} />
   );
 };
 

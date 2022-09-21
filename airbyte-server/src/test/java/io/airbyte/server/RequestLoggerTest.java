@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Airbyte, Inc., all rights reserved.
+ * Copyright (c) 2022 Airbyte, Inc., all rights reserved.
  */
 
 package io.airbyte.server;
@@ -10,6 +10,7 @@ import io.airbyte.config.helpers.LogClientSingleton;
 import io.airbyte.config.helpers.LogConfigs;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -35,8 +36,9 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.MDC;
 
+@SuppressWarnings({"PMD.AvoidPrintStackTrace", "PMD.JUnitTestsShouldIncludeAssert"})
 @ExtendWith(MockitoExtension.class)
-public class RequestLoggerTest {
+class RequestLoggerTest {
 
   private static final String VALID_JSON_OBJECT = "{\"valid\":1}";
   private static final String INVALID_JSON_OBJECT = "invalid";
@@ -47,13 +49,15 @@ public class RequestLoggerTest {
   private static final String URL = "/api/v1/test";
   private static final String REQUEST_BODY_PROPERTY = "requestBodyProperty";
 
+  private static final Random RANDOM = new Random();
+
   @Mock
   private HttpServletRequest mServletRequest;
 
   private Path logPath;
 
   @BeforeEach
-  public void init() throws IOException {
+  void init() throws IOException {
     Mockito.when(mServletRequest.getMethod())
         .thenReturn(METHOD);
     Mockito.when(mServletRequest.getRemoteAddr())
@@ -72,7 +76,7 @@ public class RequestLoggerTest {
 
   @Nested
   @DisplayName("Formats logs correctly")
-  public class RequestLoggerFormatsLogsCorrectly {
+  class RequestLoggerFormatsLogsCorrectly {
 
     private static final int ERROR_CODE = 401;
     private static final int SUCCESS_CODE = 200;
@@ -105,7 +109,7 @@ public class RequestLoggerTest {
     @ParameterizedTest
     @MethodSource("logScenarios")
     @DisplayName("Check that the proper log is produced based on the scenario")
-    public void test(final String requestBody, final String contentType, final int status, final String expectedLog) throws IOException {
+    void test(final String requestBody, final String contentType, final int status, final String expectedLog) throws IOException {
       // We have to instanciate the logger here, because the MDC config has been changed to log in a
       // temporary file.
       requestLogger = new RequestLogger(MDC.getCopyOfContextMap(), mServletRequest);
@@ -136,7 +140,7 @@ public class RequestLoggerTest {
 
   @Nested
   @DisplayName("Logs correct requestBody")
-  public class RequestLoggerCorrectRequestBody {
+  class RequestLoggerCorrectRequestBody {
 
     /**
      * This is a complex test that was written to prove that our requestLogger had a concurrency bug
@@ -157,7 +161,7 @@ public class RequestLoggerTest {
      * some request bodies are overwritten before they can be logged.
      */
     @Test
-    public void testRequestBodyConsistency() {
+    void testRequestBodyConsistency() {
       Mockito.when(mServletRequest.getHeader("Content-Type"))
           .thenReturn(ACCEPTED_CONTENT_TYPE);
 
@@ -201,17 +205,18 @@ public class RequestLoggerTest {
     }
 
     @RequiredArgsConstructor
-    public class RequestResponseRunnable implements Runnable {
+    class RequestResponseRunnable implements Runnable {
 
       private final RequestLogger requestLogger;
       private final String expectedRequestBody;
       private final ContainerRequestContext mRequestContext;
       private final ContainerResponseContext mResponseContext;
 
+      @Override
       public void run() {
         try {
           requestLogger.filter(mRequestContext);
-          Thread.sleep(new Random().nextInt(1000)); // random sleep to make race more likely
+          Thread.sleep(RANDOM.nextInt(1000)); // random sleep to make race more likely
           requestLogger.filter(mRequestContext, mResponseContext);
         } catch (final IOException | InterruptedException e) {
           e.printStackTrace();
@@ -219,7 +224,7 @@ public class RequestLoggerTest {
       }
 
       // search all log lines to see if this thread's request body was logged
-      public Boolean requestBodyWasLogged() {
+      Boolean requestBodyWasLogged() {
         return IOs.readFile(logPath).lines().anyMatch(line -> line.contains(expectedRequestBody));
       }
 
@@ -232,7 +237,7 @@ public class RequestLoggerTest {
         .thenReturn(METHOD);
 
     Mockito.when(mockContainerRequestContext.getEntityStream())
-        .thenReturn(new ByteArrayInputStream(requestBody.getBytes()));
+        .thenReturn(new ByteArrayInputStream(requestBody.getBytes(StandardCharsets.UTF_8)));
 
     Mockito.when(mockContainerRequestContext.getProperty(REQUEST_BODY_PROPERTY)).thenReturn(requestBody);
   }

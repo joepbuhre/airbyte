@@ -1,26 +1,24 @@
 import React from "react";
 import { FormattedMessage } from "react-intl";
-import { useResource } from "rest-hooks";
+import { useNavigate } from "react-router-dom";
 
 import { Button, MainPageWithScroll } from "components";
-import { RoutePaths } from "pages/routes";
-import PageTitle from "components/PageTitle";
-import useRouter from "hooks/useRouter";
-import SourcesTable from "./components/SourcesTable";
-import SourceResource from "core/resources/Source";
+import { EmptyResourceListView } from "components/EmptyResourceListView";
 import HeadTitle from "components/HeadTitle";
-import Placeholder, { ResourceTypes } from "components/Placeholder";
-import useWorkspace from "hooks/services/useWorkspace";
+import PageTitle from "components/PageTitle";
+
+import { useTrackPage, PageTrackingCodes } from "hooks/services/Analytics";
+import { useSourceList } from "hooks/services/useSourceHook";
+
+import { RoutePaths } from "../../../routePaths";
+import SourcesTable from "./components/SourcesTable";
 
 const AllSourcesPage: React.FC = () => {
-  const { push } = useRouter();
-  const { workspace } = useWorkspace();
-  const { sources } = useResource(SourceResource.listShape(), {
-    workspaceId: workspace.workspaceId,
-  });
-
-  const onCreateSource = () => push(`${RoutePaths.SourceNew}`);
-  return (
+  const navigate = useNavigate();
+  const { sources } = useSourceList();
+  useTrackPage(PageTrackingCodes.SOURCE_LIST);
+  const onCreateSource = () => navigate(`${RoutePaths.SourceNew}`);
+  return sources.length ? (
     <MainPageWithScroll
       headTitle={<HeadTitle titles={[{ id: "admin.sources" }]} />}
       pageTitle={
@@ -34,12 +32,10 @@ const AllSourcesPage: React.FC = () => {
         />
       }
     >
-      {sources.length ? (
-        <SourcesTable sources={sources} />
-      ) : (
-        <Placeholder resource={ResourceTypes.Sources} />
-      )}
+      <SourcesTable sources={sources} />
     </MainPageWithScroll>
+  ) : (
+    <EmptyResourceListView resourceType="sources" onCreateClick={onCreateSource} />
   );
 };
 

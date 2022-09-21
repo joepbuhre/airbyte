@@ -1,18 +1,21 @@
+import queryString from "query-string";
 import React, { useCallback } from "react";
 import { FormattedMessage } from "react-intl";
-import styled from "styled-components";
-import queryString from "query-string";
+import { useNavigate } from "react-router-dom";
 import { CellProps } from "react-table";
+import styled from "styled-components";
 
-import { CreditConsumptionByConnector } from "packages/cloud/lib/domain/cloudWorkspaces/types";
-import Table from "components/Table";
-import { SortOrderEnum } from "components/EntityTable/types";
 import SortButton from "components/EntityTable/components/SortButton";
-import useRouter from "hooks/useRouter";
+import { SortOrderEnum } from "components/EntityTable/types";
+import Table from "components/Table";
+
+import { useQuery } from "hooks/useQuery";
+import { CreditConsumptionByConnector } from "packages/cloud/lib/domain/cloudWorkspaces/types";
+import { useDestinationDefinitionList } from "services/connector/DestinationDefinitionService";
+import { useSourceDefinitionList } from "services/connector/SourceDefinitionService";
+
 import ConnectionCell from "./ConnectionCell";
 import UsageCell from "./UsageCell";
-import { useSourceDefinitionList } from "hooks/services/useSourceDefinition";
-import { useDestinationDefinitionList } from "hooks/services/useDestinationDefinition";
 
 const Content = styled.div`
   padding: 0 60px 0 15px;
@@ -26,9 +29,9 @@ const UsageValue = styled.div`
   min-width: 53px;
 `;
 
-type UsagePerConnectionTableProps = {
+interface UsagePerConnectionTableProps {
   creditConsumption: CreditConsumptionByConnector[];
-};
+}
 
 type FullTableProps = CreditConsumptionByConnector & {
   creditsConsumedPercent: number;
@@ -36,18 +39,14 @@ type FullTableProps = CreditConsumptionByConnector & {
   destinationIcon: string;
 };
 
-const UsagePerConnectionTable: React.FC<UsagePerConnectionTableProps> = ({
-  creditConsumption,
-}) => {
-  const { query, push } = useRouter();
+const UsagePerConnectionTable: React.FC<UsagePerConnectionTableProps> = ({ creditConsumption }) => {
+  const query = useQuery<{ sortBy?: string; order?: SortOrderEnum }>();
+  const navigate = useNavigate();
   const { sourceDefinitions } = useSourceDefinitionList();
   const { destinationDefinitions } = useDestinationDefinitionList();
 
   const creditConsumptionWithPercent = React.useMemo(() => {
-    const sumCreditsConsumed = creditConsumption.reduce(
-      (a, b) => a + b.creditsConsumed,
-      0
-    );
+    const sumCreditsConsumed = creditConsumption.reduce((a, b) => a + b.creditsConsumed, 0);
     return creditConsumption.map((item) => {
       const currentSourceDefinition = sourceDefinitions.find(
         (def) => def.sourceDefinitionId === item.sourceDefinitionId
@@ -60,9 +59,7 @@ const UsagePerConnectionTable: React.FC<UsagePerConnectionTableProps> = ({
         ...item,
         sourceIcon: currentSourceDefinition?.icon,
         destinationIcon: currentDestinationDefinition?.icon,
-        creditsConsumedPercent: sumCreditsConsumed
-          ? (item.creditsConsumed / sumCreditsConsumed) * 100
-          : 0,
+        creditsConsumedPercent: sumCreditsConsumed ? (item.creditsConsumed / sumCreditsConsumed) * 100 : 0,
       };
     });
   }, [creditConsumption, sourceDefinitions, destinationDefinitions]);
@@ -73,22 +70,18 @@ const UsagePerConnectionTable: React.FC<UsagePerConnectionTableProps> = ({
   const onSortClick = useCallback(
     (field: string) => {
       const order =
-        sortBy !== field
-          ? SortOrderEnum.ASC
-          : sortOrder === SortOrderEnum.ASC
-          ? SortOrderEnum.DESC
-          : SortOrderEnum.ASC;
-      push({
+        sortBy !== field ? SortOrderEnum.ASC : sortOrder === SortOrderEnum.ASC ? SortOrderEnum.DESC : SortOrderEnum.ASC;
+      navigate({
         search: queryString.stringify(
           {
             sortBy: field,
-            order: order,
+            order,
           },
           { skipNull: true }
         ),
       });
     },
-    [push, sortBy, sortOrder]
+    [navigate, sortBy, sortOrder]
   );
 
   const sortData = useCallback(
@@ -98,9 +91,7 @@ const UsagePerConnectionTable: React.FC<UsagePerConnectionTableProps> = ({
           ? a.creditsConsumed - b.creditsConsumed
           : `${a.sourceDefinitionName}${a.destinationDefinitionName}`
               .toLowerCase()
-              .localeCompare(
-                `${b.sourceDefinitionName}${b.destinationDefinitionName}`.toLowerCase()
-              );
+              .localeCompare(`${b.sourceDefinitionName}${b.destinationDefinitionName}`.toLowerCase());
 
       if (sortOrder === SortOrderEnum.DESC) {
         return -1 * result;
@@ -154,17 +145,13 @@ const UsagePerConnectionTable: React.FC<UsagePerConnectionTableProps> = ({
         accessor: "creditsConsumed",
         collapse: true,
         customPadding: { right: 0 },
-        Cell: ({ cell }: CellProps<FullTableProps>) => (
-          <UsageValue>{cell.value}</UsageValue>
-        ),
+        Cell: ({ cell }: CellProps<FullTableProps>) => <UsageValue>{cell.value}</UsageValue>,
       },
       {
         Header: "",
         accessor: "creditsConsumedPercent",
         customPadding: { left: 0 },
-        Cell: ({ cell }: CellProps<FullTableProps>) => (
-          <UsageCell percent={cell.value} />
-        ),
+        Cell: ({ cell }: CellProps<FullTableProps>) => <UsageCell percent={cell.value} />,
       },
       // TODO: Replace to Grow column
       {

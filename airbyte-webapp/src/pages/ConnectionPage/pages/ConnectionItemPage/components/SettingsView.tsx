@@ -1,28 +1,31 @@
 import React from "react";
-import styled from "styled-components";
 
-import useConnection from "hooks/services/useConnectionHook";
 import DeleteBlock from "components/DeleteBlock";
 
-type IProps = {
-  connectionId: string;
-};
+import { PageTrackingCodes, useTrackPage } from "hooks/services/Analytics";
+import { useAdvancedModeSetting } from "hooks/services/useAdvancedModeSetting";
+import { useDeleteConnection } from "hooks/services/useConnectionHook";
 
-const Content = styled.div`
-  max-width: 647px;
-  margin: 0 auto;
-  padding-bottom: 10px;
-`;
+import { WebBackendConnectionRead } from "../../../../../core/request/AirbyteClient";
+import styles from "./SettingsView.module.scss";
+import { StateBlock } from "./StateBlock";
 
-const SettingsView: React.FC<IProps> = ({ connectionId }) => {
-  const { deleteConnection } = useConnection();
+interface SettingsViewProps {
+  connection: WebBackendConnectionRead;
+}
 
-  const onDelete = () => deleteConnection({ connectionId });
+const SettingsView: React.FC<SettingsViewProps> = ({ connection }) => {
+  const { mutateAsync: deleteConnection } = useDeleteConnection();
+
+  const [isAdvancedMode] = useAdvancedModeSetting();
+  useTrackPage(PageTrackingCodes.CONNECTIONS_ITEM_SETTINGS);
+  const onDelete = () => deleteConnection(connection);
 
   return (
-    <Content>
+    <div className={styles.container}>
+      {isAdvancedMode && <StateBlock connectionId={connection.connectionId} />}
       <DeleteBlock type="connection" onDelete={onDelete} />
-    </Content>
+    </div>
   );
 };
 
